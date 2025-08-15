@@ -600,61 +600,64 @@ def df_download_button(df: pd.DataFrame, label: str, filename: str):
         csv = df.to_csv(index=False).encode("utf-8")
         st.download_button(label=label, data=csv, file_name=filename, mime="text/csv")
 
-# =============================
-# UI
-# =============================
+# ---------------------- Streamlit App UI ---------------------- #
+st.set_page_config(page_title="BCA E-Statement Reader", layout="wide")
+st.title("📄 BCA E-Statement Reader")
 
-st.title("📄 BRI E-Statement Reader")
-st.caption("Upload 1 atau lebih PDF e-statement BRI. App ini akan mengekstrak informasi, transaksi, dan ringkasan partner.")
+uploaded_pdf = st.file_uploader("Upload a BCA PDF e-statement", type="pdf")
 
-uploaded_files = st.file_uploader(
-    "Unggah file PDF", type=["pdf"], accept_multiple_files=True, help="Pilih satu atau beberapa file e-statement BRI"
-)
+if uploaded_pdf:
+    st.success("✅ PDF uploaded. Processing...")
 
-if uploaded_files:
-    for f in uploaded_files:
-        st.markdown("---")
-        st.subheader(f"File: {f.name}")
-        file_bytes = f.read()
+    # Read bytes once and reuse
+    pdf_bytes = uploaded_pdf.read()
+    personal_df, summary_df, trx_df, partner_trx_df, analytics_df = parse_bca_statement(io.BytesIO(pdf_bytes))
 
-        with st.spinner("Memproses..."):
-            personal_df, summary_df, trx_df, partner_trx_df, analytics_df = parse_bri_statement(file_bytes, f.name)
+    # ✅ ADD DOWNLOAD SECTION
+    st.markdown("---")
+    st.subheader("📥 Download Complete Analysis")
+    
+    # Create Excel file in memory
+    @st.cache_data
+    def create_excel_download(personal_df, summary_df, trx_df, partner_trx_df, analytics_df):
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+            personal_df.to_excel(writer, sheet_name='Account Info', index=False)
+            summary_df.to_excel(writer, sheet_name='Monthly Summary', index=False)
+            analytics_df.to_excel(writer, sheet_name='Analytics', index=False)
+            trx_df.to_excel(writer, sheet_name='Transactions', index=False)
+            partner_trx_df.to_excel(writer, sheet_name='Partner Summary', index=False)
+        
+        output.seek(0)
+        return output.getvalue()
 
-        tabs = st.tabs(["Personal", "Summary", "Transactions", "Partner Summary", "Analytics"])
+    # Generate Excel file
+    excel_data = create_excel_download(personal_df, summary_df, trx_df, partner_trx_df, analytics_df)
+    
+    # Download button
+    st.download_button(
+        label="📊 Download Complete Analysis (Excel)",
+        data=excel_data,
+        file_name=f"BCA_Statement_Analysis_{personal_df.iloc[0]['Period'] if not personal_df.empty else 'Unknown'}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
 
-        with tabs[0]:
-            if not personal_df.empty:
-                st.dataframe(personal_df, use_container_width=True)
-                df_download_button(personal_df, "⬇️ Download Personal (CSV)", f"{Path(f.name).stem}_personal.csv")
-            else:
-                st.info("Tidak ada data personal yang diekstrak.")
+    st.markdown("---")
+    
+    # Tabs section
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📌 Account Info", "📊 Monthly Summary", "📈 Analytics", "💸 Transactions", "💳 Partner Transactions"])
 
-        with tabs[1]:
-            if not summary_df.empty:
-                st.dataframe(summary_df, use_container_width=True)
-                df_download_button(summary_df, "⬇️ Download Summary (CSV)", f"{Path(f.name).stem}_summary.csv")
-            else:
-                st.info("Tidak ada summary yang diekstrak.")
+    with tab1:
+        st.dataframe(personal_df)
 
-        with tabs[2]:
-            if not trx_df.empty:
-                st.dataframe(trx_df, use_container_width=True)
-                df_download_button(trx_df, "⬇️ Download Transactions (CSV)", f"{Path(f.name).stem}_transactions.csv")
-            else:
-                st.info("Tidak ada transaksi yang diekstrak.")
+    with tab2:
+        st.dataframe(summary_df)
 
-        with tabs[3]:
-            if not partner_trx_df.empty:
-                st.dataframe(partner_trx_df, use_container_width=True)
-                df_download_button(partner_trx_df, "⬇️ Download Partner Summary (CSV)", f"{Path(f.name).stem}_partner_summary.csv")
-            else:
-                st.info("Tidak ada partner summary.")
+    with tab3:
+        st.dataframe(analytics_df)
 
-        with tabs[4]:
-            if not analytics_df.empty:
-                st.dataframe(analytics_df, use_container_width=True)
-                df_download_button(analytics_df, "⬇️ Download Analytics (CSV)", f"{Path(f.name).stem}_analytics.csv")
-            else:
-                st.info("Tidak ada analytics.")
-else:
-    st.info("Silakan unggah file PDF untuk mulai memproses.")
+    with tab4:
+        st.dataframe(trx_df)
+
+    with tab5:
+        st.dataframe(partner_trx_df)
