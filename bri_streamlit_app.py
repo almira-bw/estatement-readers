@@ -64,6 +64,33 @@ def safe_filename(text: str, default: str = "BRI_Statement_Analysis") -> str:
     text = re.sub(r"[^A-Za-z0-9._-]", "", text)
     return text[:120] if len(text) > 120 else text
 
+def detect_format_by_filename(filename: str) -> str:
+    """Deteksi format berdasarkan nama file saja."""
+    base = Path(filename).name.lower()
+
+    cms_keys = [
+        "cms", "cashmanagement", "cash-management", "ibiz", "ibizbri",
+        "corporate", "bisnis", "business"
+    ]
+    est_keys = [
+        "e-statement", "estatement", "e_statement", "statement",
+        "rekening-koran", "rekeningkoran", "e-stmt", "stmt"
+    ]
+
+    if any(k in base for k in cms_keys):
+        return "CMS"
+    if any(k in base for k in est_keys):
+        return "E_STATEMENT"
+
+    # Heuristik tahun (kalau penamaan kamu konsisten)
+    if re.search(r"\b2025\b", base):
+        return "E_STATEMENT"
+    if re.search(r"\b2024\b", base):
+        return "CMS"
+
+    # Default jika tak terdeteksi
+    return "E_STATEMENT"
+
 # ============== BRI CMS (umum 2024) ==============
 
 def extract_cms_account_info(text):
@@ -648,29 +675,36 @@ def create_partner_statistics_summary(df_for_stats):
 
 def parse_bri_statement(pdf_src, filename):
     text = read_pdf_to_text(pdf_src)
+    fmt = detect_format_by_filename(filename)
 
-    # Coba E-Statement
-    try:
-        personal_e, summary_e = extract_personal_info(text)
-        trx_e = extract_transactions(text)
-    except Exception:
-        personal_e, summary_e, trx_e = {}, {}, []
-
-    # Coba CMS
-    try:
-        personal_c = extract_cms_account_info(text)
-        summary_c  = extract_cms_summary(text)
-        trx_c      = extract_cms_transactions(text)
-    except Exception:
-        personal_c, summary_c, trx_c = {}, {}, []
-
-    # Pilih hasil dengan transaksi terbanyak
-    if len(trx_e) >= len(trx_c):
-        personal_info, summary_info, transactions = personal_e, summary_e, trx_e
-        detected_format = "E_STATEMENT"
-    else:
-        personal_info, summary_info, transactions = personal_c, summary_c, trx_c
+    # Parsers
+    if fmt == "CMS":
+        personal_info = extract_cms_account_info(text)
+        summary_info  = extract_cms_summary(text)
+        transactions  = extract_cms_transactions(text)
         detected_format = "CMS"
+    else:
+        personal_info, summary_info = extract_personal_info(text)
+        transactions = extract_transactions(text)
+        detected_format = "E_STATEMENT"
+
+    # (Opsional) fallback kalau benar-benar kosong → matikan kalau mau strict
+    FALLBACK_IF_EMPTY = True
+    if FALLBACK_IF_EMPTY and len(transactions) == 0:
+        alt_fmt = "E_STATEMENT" if fmt == "CMS" else "CMS"
+        try:
+            if alt_fmt == "CMS":
+                personal_info2 = extract_cms_account_info(text)
+                summary_info2  = extract_cms_summary(text)
+                transactions2  = extract_cms_transactions(text)
+            else:
+                personal_info2, summary_info2 = extract_personal_info(text)
+                transactions2 = extract_transactions(text)
+            if len(transactions2) > 0:
+                personal_info, summary_info, transactions = personal_info2, summary_info2, transactions2
+                detected_format = alt_fmt  # switch ke parser alternatif
+        except Exception:
+            pass
 
     trx_df = pd.DataFrame(transactions)
 
@@ -680,7 +714,6 @@ def parse_bri_statement(pdf_src, filename):
 
     if not trx_df.empty:
         partner_summary_df, partner_summary_table = analyze_bri_partners_unified(trx_df)
-        # Statistik berbasis partner_summary_df (jika ada), fallback ke trx_df
         base_stats_df = partner_summary_df if 'partner_name' in partner_summary_df.columns else trx_df
         analytics_df = create_partner_statistics_summary(base_stats_df)
 
@@ -703,6 +736,7 @@ if uploaded_pdf:
     st.success("✅ PDF uploaded. Processing...")
 
     personal_df, summary_df, trx_df, partner_trx_df, analytics_df = parse_bri_statement(pdf_bytes, filename)
+    st.caption(f"Detected by filename → {personal_df.at[0, 'Detected Format']} • rows: {len(trx_df)}")
 
     # -------- Download Excel --------
     st.markdown("---")
