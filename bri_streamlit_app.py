@@ -12,8 +12,6 @@ import io
 
 # General functions
 
-# Genetal Functions
-
 def read_pdf_to_text(pdf_path):
     text = ""
     try:
@@ -841,7 +839,7 @@ if uploaded_pdf:
 
     # Read bytes once and reuse
     pdf_bytes = uploaded_pdf.read()
-    personal_df, summary_df, trx_df, partner_trx_df, analytics_df = parse_bca_statement(io.BytesIO(pdf_bytes))
+    personal_df, summary_df, trx_df, partner_trx_df, analytics_df = parse_bri_statement(io.BytesIO(pdf_bytes))
 
     # ✅ ADD DOWNLOAD SECTION
     st.markdown("---")
