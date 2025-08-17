@@ -889,8 +889,8 @@ if uploaded_pdf:
     download_name = safe_filename(base_name) + ".xlsx"
 
     # Buat Excel dan tombol download
-    excel_bytes = to_excel(personal_df, transaksi_df, summary_df, partner_df)  # fungsi kamu
-    # excel_data = create_excel_download(personal_df, summary_df, trx_df, partner_trx_df, analytics_df)
+    # excel_bytes = to_excel(personal_df, transaksi_df, summary_df, partner_df)  # fungsi kamu
+    excel_data = create_excel_download(personal_df, summary_df, trx_df, partner_trx_df, analytics_df)
     
     # Download button
     st.download_button(
