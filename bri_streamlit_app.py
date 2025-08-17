@@ -69,12 +69,14 @@ def detect_format_by_filename(filename: str) -> str:
     base = Path(filename).name.lower()
 
     cms_keys = [
-        "cms", "cashmanagement", "cash-management", "ibiz", "ibizbri",
-        "corporate", "bisnis", "business"
+        "2024"
+        # "cms", "cashmanagement", "cash-management", "ibiz", "ibizbri",
+        # "corporate", "bisnis", "business"
     ]
     est_keys = [
-        "e-statement", "estatement", "e_statement", "statement",
-        "rekening-koran", "rekeningkoran", "e-stmt", "stmt"
+        "2025"
+        # "e-statement", "estatement", "e_statement", "statement",
+        # "rekening-koran", "rekeningkoran", "e-stmt", "stmt"
     ]
 
     if any(k in base for k in cms_keys):
