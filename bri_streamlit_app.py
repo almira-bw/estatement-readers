@@ -12,35 +12,6 @@ import io
 from pathlib import Path
 
 # Genetal Functions
-def safe_filename(text: str, default: str = "BRI_Statement_Analysis") -> str:
-    if not text or str(text).strip().lower() in {"none", "nan", "nat"}:
-        text = default
-    text = str(text)
-    
-    text = text.replace("\n", " ").replace("\r", " ").replace("\t", " ")
-    text = re.sub(r"\s+", "_", text).strip("_")
-    text = re.sub(r"[^A-Za-z0-9._-]", "", text)
-    return text[:120] if len(text) > 120 else text
-
-def get_cell(df, col, default="Unknown"):
-    try:
-        val = df.at[0, col]
-        return val if (val is not None and str(val).strip() != "") else default
-    except Exception:
-        return default
-
-account_name  = get_cell(personal_df, "Account Name", "UnknownName")
-account_no    = get_cell(personal_df, "Account Number", "XXXX")
-report_date   = get_cell(personal_df, "Report Date", "")
-
-try:
-    if report_date:
-        report_date = datetime.strptime(str(report_date), "%d %b %Y").strftime("%Y-%m-%d")
-except Exception:
-    report_date = str(report_date).replace("/", "-").replace(" ", "")
-
-base_name = f"BRI_Statement_Analysis_{account_name}_{account_no}_{report_date}".strip("_")
-download_name = safe_filename(base_name) + ".xlsx"
     
 def read_pdf_to_text(pdf_path):
     text = ""
@@ -854,6 +825,36 @@ def parse_bri_statement(pdf_path, filename):
 
     # Return all relevant DataFrames
     return personal_df, summary_df, trx_df, partner_trx_df, analytics_df
+
+def safe_filename(text: str, default: str = "BRI_Statement_Analysis") -> str:
+    if not text or str(text).strip().lower() in {"none", "nan", "nat"}:
+        text = default
+    text = str(text)
+    
+    text = text.replace("\n", " ").replace("\r", " ").replace("\t", " ")
+    text = re.sub(r"\s+", "_", text).strip("_")
+    text = re.sub(r"[^A-Za-z0-9._-]", "", text)
+    return text[:120] if len(text) > 120 else text
+
+def get_cell(df, col, default="Unknown"):
+    try:
+        val = df.at[0, col]
+        return val if (val is not None and str(val).strip() != "") else default
+    except Exception:
+        return default
+
+account_name  = get_cell(personal_df, "Account Name", "UnknownName")
+account_no    = get_cell(personal_df, "Account Number", "XXXX")
+report_date   = get_cell(personal_df, "Report Date", "")
+
+try:
+    if report_date:
+        report_date = datetime.strptime(str(report_date), "%d %b %Y").strftime("%Y-%m-%d")
+except Exception:
+    report_date = str(report_date).replace("/", "-").replace(" ", "")
+
+base_name = f"BRI_Statement_Analysis_{account_name}_{account_no}_{report_date}".strip("_")
+download_name = safe_filename(base_name) + ".xlsx"
 
 # ---------------------- Streamlit App UI ---------------------- #
 st.set_page_config(page_title="BRI E-Statement Reader", layout="wide")
