@@ -836,26 +836,6 @@ def safe_filename(text: str, default: str = "BRI_Statement_Analysis") -> str:
     text = re.sub(r"[^A-Za-z0-9._-]", "", text)
     return text[:120] if len(text) > 120 else text
 
-def get_cell(df, col, default="Unknown"):
-    try:
-        val = df.at[0, col]
-        return val if (val is not None and str(val).strip() != "") else default
-    except Exception:
-        return default
-
-account_name  = get_cell(personal_df, "Account Name", "UnknownName")
-account_no    = get_cell(personal_df, "Account Number", "XXXX")
-report_date   = get_cell(personal_df, "Report Date", "")
-
-try:
-    if report_date:
-        report_date = datetime.strptime(str(report_date), "%d %b %Y").strftime("%Y-%m-%d")
-except Exception:
-    report_date = str(report_date).replace("/", "-").replace(" ", "")
-
-base_name = f"BRI_Statement_Analysis_{account_name}_{account_no}_{report_date}".strip("_")
-download_name = safe_filename(base_name) + ".xlsx"
-
 # ---------------------- Streamlit App UI ---------------------- #
 st.set_page_config(page_title="BRI E-Statement Reader", layout="wide")
 st.title("📄 BRI E-Statement Reader")
@@ -894,7 +874,23 @@ if uploaded_pdf:
         return output.getvalue()
 
     # Generate Excel file
-    excel_data = create_excel_download(personal_df, summary_df, trx_df, partner_trx_df, analytics_df)
+    def get_cell(df, col, default="Unknown"):
+        try:
+            val = df.at[0, col]
+            return val if (val is not None and str(val).strip() != "") else default
+        except Exception:
+            return default
+
+    account_name  = get_cell(personal_df, "Account Name", "UnknownName")
+    account_no    = get_cell(personal_df, "Account Number", "XXXX")
+    report_date   = get_cell(personal_df, "Report Date", "")
+
+    base_name = f"BRI_Statement_Analysis_{account_name}_{account_no}_{report_date}".strip("_")
+    download_name = safe_filename(base_name) + ".xlsx"
+
+    # Buat Excel dan tombol download
+    excel_bytes = to_excel(personal_df, transaksi_df, summary_df, partner_df)  # fungsi kamu
+    # excel_data = create_excel_download(personal_df, summary_df, trx_df, partner_trx_df, analytics_df)
     
     # Download button
     st.download_button(
