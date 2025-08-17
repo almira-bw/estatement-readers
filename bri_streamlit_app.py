@@ -222,9 +222,7 @@ def extract_cms_summary(text):
 
 # BRI 2025 Format
 def extract_personal_info(text):
-    personal_info = {
-        "Bank": "BRI",
-        "Account Name": None,
+    personal_info = {"Bank": "BRI", "Account Name": None,
         "Account Number": None,
         "Address": None,
         "Report Date": None,
@@ -234,7 +232,7 @@ def extract_personal_info(text):
         "Currency": None,
         "Period": None,
         "Start Period": None,
-        "End Period": None,
+        "End Period": None
     }
 
     # Ekstrak nama - dengan multiple patterns yang lebih fleksibel
