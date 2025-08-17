@@ -12,7 +12,36 @@ import io
 from pathlib import Path
 
 # Genetal Functions
+def safe_filename(text: str, default: str = "BRI_Statement_Analysis") -> str:
+    if not text or str(text).strip().lower() in {"none", "nan", "nat"}:
+        text = default
+    text = str(text)
+    
+    text = text.replace("\n", " ").replace("\r", " ").replace("\t", " ")
+    text = re.sub(r"\s+", "_", text).strip("_")
+    text = re.sub(r"[^A-Za-z0-9._-]", "", text)
+    return text[:120] if len(text) > 120 else text
 
+def get_cell(df, col, default="Unknown"):
+    try:
+        val = df.at[0, col]
+        return val if (val is not None and str(val).strip() != "") else default
+    except Exception:
+        return default
+
+account_name  = get_cell(personal_df, "Account Name", "UnknownName")
+account_no    = get_cell(personal_df, "Account Number", "XXXX")
+report_date   = get_cell(personal_df, "Report Date", "")
+
+try:
+    if report_date:
+        report_date = datetime.strptime(str(report_date), "%d %b %Y").strftime("%Y-%m-%d")
+except Exception:
+    report_date = str(report_date).replace("/", "-").replace(" ", "")
+
+base_name = f"BRI_Statement_Analysis_{account_name}_{account_no}_{report_date}".strip("_")
+download_name = safe_filename(base_name) + ".xlsx"
+    
 def read_pdf_to_text(pdf_path):
     text = ""
     try:
@@ -827,19 +856,23 @@ def parse_bri_statement(pdf_path, filename):
     return personal_df, summary_df, trx_df, partner_trx_df, analytics_df
 
 # ---------------------- Streamlit App UI ---------------------- #
-st.set_page_config(page_title="BCA E-Statement Reader", layout="wide")
-st.title("📄 BCA E-Statement Reader")
+st.set_page_config(page_title="BRI E-Statement Reader", layout="wide")
+st.title("📄 BRI E-Statement Reader")
 
-uploaded_pdf = st.file_uploader("Upload a BCA PDF e-statement", type="pdf")
+uploaded_pdf = st.file_uploader("Upload a BRI PDF e-statement", type="pdf")
 
 if uploaded_pdf:
     pdf_bytes = uploaded_pdf.read()
+    pdf_buffer = io.BytesIO(pdf_bytes)
+    pdf_buffer.seek(0)
     filename = uploaded_pdf.name
     st.success("✅ PDF uploaded. Processing...")
 
     # Read bytes once and reuse
     pdf_bytes = uploaded_pdf.read()
     personal_df, summary_df, trx_df, partner_trx_df, analytics_df = parse_bri_statement(io.BytesIO(pdf_bytes), filename)
+
+    uploaded = st.file_uploader("Upload PDF", type="pdf")
 
     # ✅ ADD DOWNLOAD SECTION
     st.markdown("---")
@@ -865,8 +898,8 @@ if uploaded_pdf:
     # Download button
     st.download_button(
         label="📊 Download Complete Analysis (Excel)",
-        data=excel_data,
-        file_name=f"BRI_Statement_Analysis_{personal_df.iloc[0] if not personal_df.empty else 'Unknown'}.xlsx",
+        data=excel_bytes,
+        file_name=download_name,
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 
