@@ -1,10 +1,15 @@
+from pathlib import Path
+
+app_code = r'''
 import io
 import re
 import pandas as pd
 import pdfplumber
 import streamlit as st
 
-st.set_page_config(page_title="BRI E-Statement Reader", layout="wide")
+# =============================
+# Core utilities & parsers (reused from previous version)
+# =============================
 
 @st.cache_data(show_spinner=False)
 def read_pdf_to_text(file_bytes: bytes) -> str:
@@ -14,7 +19,7 @@ def read_pdf_to_text(file_bytes: bytes) -> str:
             for page in pdf.pages:
                 page_text = page.extract_text()
                 if page_text:
-                    text += page_text + "\\n"
+                    text += page_text + "\n"
     except Exception as e:
         st.warning(f"Error reading PDF: {e}")
     return text
@@ -34,24 +39,21 @@ def clean_amount(amount_str: str) -> float:
     except Exception:
         return 0.0
 
-# =============================
-# Parsers — CMS (older) format
-# =============================
-
+# ---- CMS (older) format ----
 def extract_cms_account_info(text):
     account_info = {
-        "Bank": "BRI",
+        "Bank": "BCA",
         "Account Name": None,
         "Account Number": None,
         "Start Period": None,
         "End Period": None,
+        "Period": None,
     }
-
     account_patterns = [
-        r"Account\\s+No\\s*:?\\s*(\\d{4}-\\d{2}-\\d{6}-\\d{2}-\\d)",
-        r"Account\\s+No\\s*:?\\s*(\\d+)",
-        r"Account\\s+No\\s*\\n*\\s*:?\\s*(\\d{4}-\\d{2}-\\d{6}-\\d{2}-\\d)",
-        r"Account\\s+No\\s*\\n*\\s*(\\d+)",
+        r"Account\s+No\s*:?\s*(\d{4}-\d{2}-\d{6}-\d{2}-\d)",
+        r"Account\s+No\s*:?\s*(\d+)",
+        r"Account\s+No\s*\n*\s*:?\s*(\d{4}-\d{2}-\d{6}-\d{2}-\d)",
+        r"Account\s+No\s*\n*\s*(\d+)",
     ]
     for pattern in account_patterns:
         m = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
@@ -60,12 +62,12 @@ def extract_cms_account_info(text):
             break
 
     name_patterns = [
-        r"Account\\s+Name\\s*:?\\s*([A-Z][A-Z\\s&\\.]+?)(?=\\s*Today\\s*Hold|\\s*Period|\\s*Account\\s*Status)",
-        r"Account\\s+Name\\s*\\n*\\s*:?\\s*([A-Z][A-Z\\s&\\.]+?)(?=\\s*Today|\\s*Period|\\s*Account\\s*Status)",
-        r"Account\\s+Name\\s+([A-Z][A-Z\\s&\\.]+?)(?=\\s*Today|\\s*Period|\\s*Account\\s*Status)",
-        r"Account\\s+Name\\s*:?\\s*(PT\\s+[A-Z\\s]+)",
-        r"Account\\s+Name\\s*:?\\s*([A-Z][A-Z\\s&\\.PT]+)",
-        r"Account\\s+Name\\s*:?\\s*([A-Z\\s&\\.PT]+?)(?=\\s*\\n|\\s*Today|\\s*Period|\\s*Account)",
+        r"Account\s+Name\s*:?\s*([A-Z][A-Z\s&\.]+?)(?=\s*Today\s*Hold|\s*Period|\s*Account\s*Status)",
+        r"Account\s+Name\s*\n*\s*:?\s*([A-Z][A-Z\s&\.]+?)(?=\s*Today|\s*Period|\s*Account\s*Status)",
+        r"Account\s+Name\s+([A-Z][A-Z\s&\.]+?)(?=\s*Today|\s*Period|\s*Account\s*Status)",
+        r"Account\s+Name\s*:?\s*(PT\s+[A-Z\s]+)",
+        r"Account\s+Name\s*:?\s*([A-Z][A-Z\s&\.PT]+)",
+        r"Account\s+Name\s*:?\s*([A-Z\s&\.PT]+?)(?=\s*\n|\s*Today|\s*Period|\s*Account)",
     ]
     for pattern in name_patterns:
         m = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
@@ -74,56 +76,33 @@ def extract_cms_account_info(text):
             break
 
     period_patterns = [
-        r"Period\\s*:?\\s*(\\d{2}/\\d{2}/\\d{4})\\s*-\\s*(\\d{2}/\\d{2}/\\d{4})",
-        r"Period\\s*\\n*\\s*:?\\s*(\\d{2}/\\d{2}/\\d{4})\\s*-\\s*(\\d{2}/\\d{2}/\\d{4})",
+        r"Period\s*:?\s*(\d{2}/\d{2}/\d{4})\s*-\s*(\d{2}/\d{2}/\d{4})",
+        r"Period\s*\n*\s*:?\s*(\d{2}/\d{2}/\d{4})\s*-\s*(\d{2}/\d{2}/\d{4})",
     ]
     for pattern in period_patterns:
         m = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
         if m:
             account_info["Start Period"] = m.group(1)
             account_info["End Period"] = m.group(2)
+            account_info["Period"] = f"{m.group(1)} - {m.group(2)}"
             break
-
-    if not any(account_info.values()):
-        lines = text.split("\\n")
-        for i, line in enumerate(lines):
-            line = line.strip()
-            if "Account No" in line and ":" in line:
-                parts = line.split(":")
-                if len(parts) > 1:
-                    account_info["Account Number"] = parts[1].strip()
-            elif "Account Name" in line and ":" in line:
-                parts = line.split(":")
-                if len(parts) > 1:
-                    account_info["Account Name"] = parts[1].strip()
-                elif i + 1 < len(lines):
-                    next_line = lines[i + 1].strip()
-                    if next_line and not any(k in next_line for k in ["Account", "Today", "Period"]):
-                        account_info["Account Name"] = next_line
-            elif "Period" in line and ":" in line:
-                parts = line.split(":")
-                if len(parts) > 1:
-                    pm = re.search(r"(\\d{2}/\\d{2}/\\d{4})\\s*-\\s*(\\d{2}/\\d{2}/\\d{4})", parts[1])
-                    if pm:
-                        account_info["Start Period"] = pm.group(1)
-                        account_info["End Period"] = pm.group(2)
     return account_info
 
 def extract_cms_transactions(text):
     transactions = []
-    lines = text.split("\\n")
+    lines = text.split("\n")
     for line in lines:
         line = line.strip()
         if not line:
             continue
-        if re.match(r"^\\d{2}/\\d{2}/\\d{2}\\s+\\d{2}:\\d{2}:\\d{2}", line):
+        if re.match(r"^\d{2}/\d{2}/\d{2}\s+\d{2}:\d{2}:\d{2}", line):
             try:
                 parts = line.split()
                 if len(parts) >= 6:
                     numeric_parts = []
                     for i in range(len(parts) - 1, -1, -1):
                         part = parts[i]
-                        if re.match(r"^[\\d,\\.]+$", part) or re.match(r"^\\d{7}$", part) or part in ["CMSPYRL", "BRI0372", "BRIMDBT"]:
+                        if re.match(r"^[\d,\.]+$", part) or re.match(r"^\d{7}$", part) or part in ["CMSPYRL", "BRI0372", "BRIMDBT"]:
                             numeric_parts.insert(0, part)
                             if len(numeric_parts) == 4:
                                 break
@@ -131,7 +110,6 @@ def extract_cms_transactions(text):
                         debet_str = numeric_parts[0]
                         credit_str = numeric_parts[1]
                         ledger_str = numeric_parts[2]
-                        # teller_id = numeric_parts[3]  # not used in output here
                         debet = clean_amount(debet_str) if debet_str != "0.00" else 0.0
                         credit = clean_amount(credit_str) if credit_str != "0.00" else 0.0
                         ledger = clean_amount(ledger_str)
@@ -150,7 +128,7 @@ def extract_cms_transactions(text):
 def extract_cms_summary(text):
     summary = {}
     summary_pattern = re.compile(
-        r"OPENING\\s+BALANCE\\s+TOTAL\\s+DEBET\\s+TOTAL\\s+CREDIT\\s+CLOSING\\s+BALANCE\\s*\\n\\s*([\\d,\\.]+)\\s+([\\d,\\.]+)\\s+([\\d,\\.]+)\\s+([\\d,\\.]+)",
+        r"OPENING\s+BALANCE\s+TOTAL\s+DEBET\s+TOTAL\s+CREDIT\s+CLOSING\s+BALANCE\s*\n\s*([\d,\.]+)\s+([\d,\.]+)\s+([\d,\.]+)\s+([\d,\.]+)",
         re.IGNORECASE | re.MULTILINE,
     )
     m = summary_pattern.search(text)
@@ -164,13 +142,10 @@ def extract_cms_summary(text):
             pass
     return summary
 
-# =============================
-# Parsers — 2025 e-statement
-# =============================
-
+# ---- 2025-like e-statement ----
 def extract_personal_info(text):
     personal_info = {
-        "Bank": "BRI",
+        "Bank": "BCA",
         "Account Name": None,
         "Account Number": None,
         "Address": None,
@@ -183,38 +158,32 @@ def extract_personal_info(text):
         "Start Period": None,
         "End Period": None,
     }
-
     nama_patterns = [
-        r"(?:Kepada\\s+Yth\\.\\s*/\\s*To\\s*:\\s*\\n\\s*[A-Z][A-Z\\s]*?\\n)\\s*(.*?)(?=\\n\\n|\\nNo\\.\\s*Rekening|\\nTanggal\\s+Laporan|\\nPeriode\\s+Transaksi|\\nNo\\s+Rekening)",
-        r"Kepada\\s+Yth\\.\\s*/\\s*To\\s*:\\s*\\n\\s*([^\\n]+)(?:\\n([^\\n]*?))*?(?=\\n\\s*No\\.\\s*Rekening|\\n\\s*Tanggal\\s+Laporan|\\n\\s*Account\\s+No)",
-        r"Kepada\\s+Yth\\.\\s*/\\s*To\\s*:\\s*\\n\\s*(.+?)(?=\\n\\s*No\\.\\s*Rekening)",
+        r"(?:Kepada\s+Yth\.\s*/\s*To\s*:\s*\n\s*[A-Z][A-Z\s]*?\n)\s*(.*?)(?=\n\n|\nNo\.\s*Rekening|\nTanggal\s+Laporan|\nPeriode\s+Transaksi|\nNo\s+Rekening)",
+        r"Kepada\s+Yth\.\s*/\s*To\s*:\s*\n\s*([^\n]+)(?:\n([^\n]*?))*?(?=\n\s*No\.\s*Rekening|\n\s*Tanggal\s+Laporan|\n\s*Account\s+No)",
+        r"Kepada\s+Yth\.\s*/\s*To\s*:\s*\n\s*(.+?)(?=\n\s*No\.\s*Rekening)",
     ]
     for pattern in nama_patterns:
         m = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
         if m:
             extracted_text = m.group(1).strip()
-            lines = [ln.strip() for ln in extracted_text.split("\\n") if ln.strip()]
+            lines = [ln.strip() for ln in extracted_text.split("\n") if ln.strip()]
             if lines:
                 personal_info["Account Name"] = lines[0]
                 if len(lines) > 1:
                     alamat_lines = lines[1:]
                     alamat_filtered = []
                     for ln in alamat_lines:
-                        if not re.match(r"\\d{2}/\\d{2}/\\d{2,4}", ln) and "Periode" not in ln:
+                        if not re.match(r"\d{2}/\d{2}/\d{2,4}", ln) and "Periode" not in ln:
                             alamat_filtered.append(ln)
                     if alamat_filtered:
                         alamat_cleaned = " ".join(alamat_filtered)
-                        personal_info["Address"] = re.sub(r"\\s+", " ", alamat_cleaned)
+                        personal_info["Address"] = re.sub(r"\s+", " ", alamat_cleaned)
             break
 
-    if not personal_info.get("Account Name"):
-        sm = re.search(r"Kepada\\s+Yth\\.\\s*/\\s*To\\s*:\\s*\\n\\s*([A-Z][A-Z\\s]+)", text, re.IGNORECASE)
-        if sm:
-            personal_info["Account Name"] = sm.group(1).strip()
-
     tanggal_patterns = [
-        r"Tanggal\\s+Laporan\\s*[:\\s]*(\\d{2}/\\d{2}/\\d{2,4})",
-        r"Statement\\s+Date\\s*[:\\s]*(\\d{2}/\\d{2}/\\d{2,4})",
+        r"Tanggal\s+Laporan\s*[:\s]*(\d{2}/\d{2}/\d{2,4})",
+        r"Statement\s+Date\s*[:\s]*(\d{2}/\d{2}/\d{2,4})",
     ]
     for pattern in tanggal_patterns:
         m = re.search(pattern, text, re.IGNORECASE)
@@ -223,20 +192,21 @@ def extract_personal_info(text):
             break
 
     periode_patterns = [
-        r"Periode\\s+Transaksi\\s*[:\\s]*(\\d{2}/\\d{2}/\\d{2,4})\\s*-\\s*(\\d{2}/\\d{2}/\\d{2,4})",
-        r"Transaction\\s+Period\\s*[:\\s]*(\\d{2}/\\d{2}/\\d{2,4})\\s*-\\s*(\\d{2}/\\d{2}/\\d{2,4})",
+        r"Periode\s+Transaksi\s*[:\s]*(\d{2}/\d{2}/\d{2,4})\s*-\s*(\d{2}/\d{2}/\d{2,4})",
+        r"Transaction\s+Period\s*[:\s]*(\d{2}/\d{2}/\d{2,4})\s*-\s*(\d{2}/\d{2}/\d{2,4})",
     ]
     for pattern in periode_patterns:
         m = re.search(pattern, text, re.IGNORECASE)
         if m:
             personal_info["Start Period"] = m.group(1)
             personal_info["End Period"] = m.group(2)
+            personal_info["Period"] = f"{m.group(1)} - {m.group(2)}"
             break
 
     rekening_patterns = [
-        r"No\\.\\s*Rekening\\s*\\n*Account\\s*No\\s*[,:]*\\s*(\\d+)",
-        r"No\\.\\s*Rekening\\s*[:\\s]*(\\d+)",
-        r"Account\\s*No\\s*[:\\s]*(\\d+)",
+        r"No\.\s*Rekening\s*\n*Account\s*No\s*[,:]*\s*(\d+)",
+        r"No\.\s*Rekening\s*[:\s]*(\d+)",
+        r"Account\s*No\s*[:\s]*(\d+)",
     ]
     for pattern in rekening_patterns:
         m = re.search(pattern, text, re.IGNORECASE)
@@ -244,7 +214,7 @@ def extract_personal_info(text):
             personal_info["Account Number"] = m.group(1)
             break
 
-    produk_patterns = [r"(?:Nama\\s+Produk|Product\\s+Name)\\s*[,:]*\\s*(.*?)(?=\\s*(?:Unit\\s*Kerja|Business\\s*Unit|Valuta|Currency|Alamat\\s*Unit\\s*Kerja|\\n|$))"]
+    produk_patterns = [r"(?:Nama\s+Produk|Product\s+Name)\s*[,:]*\s*(.*?)(?=\s*(?:Unit\s*Kerja|Business\s*Unit|Valuta|Currency|Alamat\s*Unit\s*Kerja|\n|$))"]
     for pattern in produk_patterns:
         m = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
         if m:
@@ -252,9 +222,9 @@ def extract_personal_info(text):
             break
 
     valuta_patterns = [
-        r"Valuta\\s*\\n*Currency\\s*[,:]*\\s*([A-Z]+)",
-        r"Valuta\\s*[:\\s]*([A-Z]+)",
-        r"Currency\\s*[:\\s]*([A-Z]+)",
+        r"Valuta\s*\n*Currency\s*[,:]*\s*([A-Z]+)",
+        r"Valuta\s*[:\s]*([A-Z]+)",
+        r"Currency\s*[:\s]*([A-Z]+)",
     ]
     for pattern in valuta_patterns:
         m = re.search(pattern, text, re.IGNORECASE)
@@ -262,92 +232,22 @@ def extract_personal_info(text):
             personal_info["Currency"] = m.group(1).strip()
             break
 
-    unit_patterns = [
-        r"Unit\\s+Kerja\\s*\\n*Business\\s+Unit\\s*[,:]*\\s*([A-Z][A-Z\\s]*?)(?=\\s*(?:Alamat\\s+Unit|Business\\s+Unit\\s+Address|\\n|$))",
-        r"Unit\\s+Kerja\\s*[:\\s]*([A-Z][A-Z\\s]*?)(?=\\s*(?:Alamat\\s+Unit|Business\\s+Unit\\s+Address|\\n|$))",
-        r"Business\\s+Unit\\s*[:\\s]*([A-Z][A-Z\\s]*?)(?=\\s*(?:Alamat\\s+Unit|Business\\s+Unit\\s+Address|\\n|$))",
-    ]
-    for pattern in unit_patterns:
-        m = re.search(pattern, text, re.IGNORECASE)
-        if m:
-            personal_info["Branch"] = m.group(1).strip()
-            break
-
-    alamat_unit_kerja_patterns = [
-        r"(?:Alamat\\s+Unit\\s+Kerja|Business\\s+Unit\\s+Address)\\s*[,:]*\\s*\\n\\s*([A-Z][A-Z\\s]*?)\\n\\s*([A-Z][A-Z\\s]*?)(?=\\n|$)",
-        r"(?:Alamat\\s+Unit\\s+Kerja|Business\\s+Unit\\s+Address)\\s*[,:]*\\s*([A-Z][A-Z\\s]*?)\\n\\s*([A-Z][A-Z\\s]*?)(?=\\n|$)",
-        r"(?:Alamat\\s+Unit\\s+Kerja|Business\\s+Unit\\s+Address)\\s*[,:]*\\s*([A-Z][A-Z\\s]*?)(?=\\n|$)",
-    ]
-    for pattern in alamat_unit_kerja_patterns:
-        m = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
-        if m:
-            if len(m.groups()) >= 2:
-                alamat_temp = f"{m.group(1).strip()} {m.group(2).strip()}"
-            else:
-                alamat_temp = m.group(1).strip()
-            alamat_temp = re.sub(r"Product\\s+Name\\s*Business\\s*Unit\\s*Address ", "", alamat_temp, flags=re.IGNORECASE).strip()
-            personal_info["Business Unit Address"] = alamat_temp
-            break
-
-    financial_summary = {}
-    try:
-        balance_summary_pattern = re.compile(
-            r"(?:Saldo Awal|Opening Balance)\\s*\\n?"
-            r"(?:Opening Balance)?\\s*\\n?"
-            r"(?:Total Transaksi Debet|Total Debit Transaction)\\s*\\n?"
-            r"(?:Total Debit Transaction)?\\s*\\n?"
-            r"(?:Total Transaksi Kredit|Total Credit Transaction)\\s*\\n?"
-            r"(?:Total Credit Transaction)?\\s*\\n?"
-            r"(?:Saldo Akhir|Closing Balance)\\s*\\n?"
-            r"(?:Closing Balance)?\\s*\\n?"
-            r"([\\d,\\.]+\\s+[\\d,\\.]+\\s+[\\d,\\.]+\\s+[\\d,\\.]+)",
-            re.IGNORECASE | re.DOTALL,
-        )
-        fm = balance_summary_pattern.search(text)
-        if fm:
-            amounts_line = fm.group(1).strip()
-            amounts = amounts_line.split()
-
-            def parse_amount(amount_str):
-                try:
-                    s = amount_str.strip()
-                    if "," in s and s.rfind(",") > s.rfind("."):
-                        s = s.replace(".", "").replace(",", ".")
-                    elif "," in s:
-                        s = s.replace(",", "")
-                    elif s.count(".") > 1:
-                        parts = s.rsplit(".", 1)
-                        integer_part = parts[0].replace(".", "")
-                        decimal_part = parts[1] if len(parts) > 1 else ""
-                        s = f"{integer_part}.{decimal_part}" if decimal_part else integer_part
-                    return float(s)
-                except Exception:
-                    return 0.0
-
-            if len(amounts) >= 4:
-                financial_summary["opening_balance"] = parse_amount(amounts[0])
-                financial_summary["total_debit_transaction"] = parse_amount(amounts[1])
-                financial_summary["total_credit_transaction"] = parse_amount(amounts[2])
-                financial_summary["closing_balance"] = parse_amount(amounts[3])
-    except Exception as e:
-        st.warning(f"Error extracting financial summary: {e}")
-
-    return personal_info, financial_summary
+    return personal_info
 
 def extract_transactions(text: str):
     transactions = []
-    lines = text.split("\\n")
+    lines = text.split("\n")
     for line in lines:
         line = line.strip()
         if not line:
             continue
-        if re.match(r"^\\d{2}/\\d{2}/\\d{2}\\s+\\d{2}:\\d{2}:\\d{2}", line):
+        if re.match(r"^\d{2}/\d{2}/\d{2}\s+\d{2}:\d{2}:\d{2}", line):
             parts = line.split()
             if len(parts) >= 7:
                 try:
                     numeric_parts = []
                     for i in range(len(parts) - 1, -1, -1):
-                        if re.match(r"^[\\d,\\.]+$", parts[i]) or re.match(r"^\\d{7}$", parts[i]):
+                        if re.match(r"^[\d,\.]+$", parts[i]) or re.match(r"^\d{7}$", parts[i]):
                             numeric_parts.insert(0, parts[i])
                             if len(numeric_parts) == 4:
                                 break
@@ -372,99 +272,23 @@ def extract_transactions(text: str):
                     continue
     return transactions
 
-# =============================
-# Partner detection & analytics
-# =============================
-
+# ---- Partner & analytics (generic) ----
 def extract_partner_name_bri(description: str):
     if description is None or (isinstance(description, float) and pd.isna(description)):
         return None
-    skip_keywords = [
-        "BIAYA", "ADM", "BUNGA", "PAJAK", "KLIRING", "TARIK TUNAI",
-        "SETORAN", "BI-FAST", "BPJS", "TAX", "INTEREST",
-        "FEE", "SINGLE CN", "POLLING", "REWARD", "CLAIM", "BPJS TK", "BPJS KESEHATAN"
-    ]
+    skip_keywords = ["BIAYA", "ADM", "BUNGA", "PAJAK", "KLIRING", "TARIK TUNAI",
+                     "SETORAN", "BI-FAST", "BPJS", "TAX", "INTEREST",
+                     "FEE", "SINGLE CN", "POLLING", "REWARD", "CLAIM", "BPJS TK", "BPJS KESEHATAN"]
     if any(k in str(description).upper() for k in skip_keywords):
         return None
     cleaned = str(description).strip()
-    if re.search(r"BM\\d+", cleaned):
-        lines = [ln.strip() for ln in cleaned.split("\\n") if ln.strip()]
-        company_words = []
-        esb_found = False
-        for ln in lines:
-            if ln.startswith("ESB:"):
-                esb_found = True
-                continue
-            if re.match(r"^BM\\d+\\s+\\d+\\s+\\d+", ln):
-                bm_match = re.search(r"BM\\d+\\s+\\d+\\s+\\d+\\s+(.+)", ln)
-                if bm_match:
-                    company_part = bm_match.group(1).strip()
-                    words = [w for w in company_part.split() if w.isalpha() and len(w) >= 2]
-                    company_words.extend(words)
-            else:
-                if not esb_found:
-                    words = [w for w in ln.split() if w.isalpha() and len(w) >= 2]
-                    company_words.extend(words)
-        if company_words:
-            return " ".join(company_words)
-    if "NBMB" in cleaned.upper():
-        nbmb_pattern = r"NBMB\\s+(.*?)\\s+TO\\s+(.*?)(?:\\n|ESB:|$)"
-        m = re.search(nbmb_pattern, cleaned, re.IGNORECASE | re.DOTALL)
-        if m:
-            receiver = m.group(2).strip()
-            sender = m.group(1).strip()
-            return receiver if receiver else sender
-    elif "WBNKTRF" in cleaned.upper():
-        after = re.sub(r"WBNKTRF\\w+", "", cleaned, flags=re.IGNORECASE)
-        after = re.sub(r"ESB:.*", "", after, flags=re.DOTALL)
-        words = [w for w in after.split() if w.isalpha() and len(w) >= 2]
-        if words:
-            return " ".join(words)
-    elif "BFST" in cleaned.upper():
-        content = re.sub(r"BFST\\d+", "", cleaned, flags=re.IGNORECASE)
-        content = re.sub(r"ESB:.*", "", content, flags=re.DOTALL)
-        content = re.sub(r"\\d{8,}", "", content)
-        if ":" in content:
-            names = content.split(":")
-            for name in names:
-                clean_name = "".join(c for c in name if c.isalpha() or c.isspace()).strip()
-                if clean_name and len(clean_name) >= 3:
-                    return clean_name
-        else:
-            words = [w for w in content.split() if w.isalpha() and len(w) >= 2]
-            if words:
-                return " ".join(words)
-    elif any(bank in cleaned.upper() for bank in ["BCA", "BNI", "MANDIRI", "DANAMON"]):
-        bank_pattern = r"(.*?)(?:-BANK|-BCA|-BNI|-MANDIRI|-DANAMON)"
-        m = re.search(bank_pattern, cleaned, re.IGNORECASE | re.DOTALL)
-        if m:
-            company_part = re.sub(r"^(PT\\s+)?", "", m.group(1).strip(), flags=re.IGNORECASE)
-            words = [w for w in company_part.split() if w.isalpha() and len(w) >= 2]
-            if words:
-                return " ".join(words)
-    elif "IBIZ" in cleaned.upper():
-        if " TO " in cleaned.upper():
-            parts = cleaned.split(" TO ")
-            if len(parts) > 1:
-                receiver_part = parts[1].split("ESB:")[0].strip()
-                words = [w for w in receiver_part.split() if w.isalpha() and len(w) >= 2]
-                if words:
-                    return " ".join(words[:4])
-    elif "PAYROLL" in cleaned.upper():
-        return "PAYROLL"
-    elif "SETOR" in cleaned.upper() and "PENJUALAN" in cleaned.upper():
-        return "PENJUALAN INTERNAL"
-    else:
-        general_clean = re.sub(r"ESB:.*", "", cleaned, flags=re.DOTALL)
-        general_clean = re.sub(r"\\b\\d{7,}\\b", "", general_clean)
-        general_clean = re.sub(r"\\b[A-Z]{2,}\\d+[A-Z]*\\b", "", general_clean)
-        words = [w for w in general_clean.split() if w.isalpha() and len(w) >= 2]
-        filtered = [w for w in words if w.upper() not in ["THE", "AND", "OR", "TO", "FROM", "FOR", "WITH"]]
-        if len(filtered) >= 2:
-            return " ".join(filtered[:4])
+    # For generic BCA, keep a simple fallback extraction
+    words = [w for w in re.sub(r"\b\d{7,}\b", "", cleaned).split() if w.isalpha() and len(w) >= 2]
+    if len(words) >= 2:
+        return " ".join(words[:4])
     return None
 
-def detect_bri_format(df: pd.DataFrame) -> str:
+def detect_format(df: pd.DataFrame) -> str:
     if "Remark" in df.columns:
         return "CMS"
     elif "deskripsi" in df.columns:
@@ -472,10 +296,10 @@ def detect_bri_format(df: pd.DataFrame) -> str:
     else:
         return "UNKNOWN"
 
-def analyze_bri_partners_unified(transactions_df: pd.DataFrame):
+def analyze_partners(transactions_df: pd.DataFrame):
     if transactions_df.empty:
         return transactions_df, pd.DataFrame()
-    fmt = detect_bri_format(transactions_df)
+    fmt = detect_format(transactions_df)
     df = transactions_df.copy()
     if fmt == "CMS":
         desc_col, debit_col, credit_col = "Remark", "Debit", "Credit"
@@ -525,8 +349,8 @@ def create_partner_summary_table(partner_df: pd.DataFrame) -> pd.DataFrame:
             "Partner": partner,
             "Total_Credit": total_credit,
             "Total_Debit": total_debit,
-            "Credit_Count": credit_count,
-            "Debit_Count": debit_count,
+            "Credit_Count": int(credit_count),
+            "Debit_Count": int(debit_count),
             "Total_Transactions": total_transactions,
         })
     df = pd.DataFrame(summary_rows)
@@ -568,39 +392,43 @@ def create_partner_statistics_summary(partner_df: pd.DataFrame) -> pd.DataFrame:
     }
     return pd.DataFrame([summary_data])
 
-# =============================
-# Orchestrator
-# =============================
-
-def parse_bri_statement(file_bytes: bytes, filename: str):
+# ---- Orchestrators ----
+def parse_bca_statement(file_like) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """
+    Accepts io.BytesIO or file-like obj; returns
+    personal_df, summary_df, trx_df, partner_trx_df, analytics_df
+    """
+    # read bytes
+    file_like.seek(0)
+    file_bytes = file_like.read()
     text = read_pdf_to_text(file_bytes)
 
-    # Try 2025 e-statement first; if empty, fall back to CMS
-    personal_info, summary_info = extract_personal_info(text)
+    # Try 2025-like parsing first; if no transactions, fallback to CMS
+    personal_info = extract_personal_info(text)
     trx_2025 = extract_transactions(text)
-    if not trx_2025:
-        # fallback to CMS
-        personal_info = extract_cms_account_info(text)
-        summary_info = extract_cms_summary(text)
-        trx_df = pd.DataFrame(extract_cms_transactions(text))
-    else:
+    if trx_2025:
         trx_df = pd.DataFrame(trx_2025)
+        summary_df = pd.DataFrame()  # BCA variant may not have the same block; keep empty if not found
+    else:
+        personal_info = extract_cms_account_info(text)
+        summary_df = pd.DataFrame([extract_cms_summary(text)])
+        trx_df = pd.DataFrame(extract_cms_transactions(text))
 
+    personal_df = pd.DataFrame([personal_info]) if personal_info else pd.DataFrame()
+
+    # Partner analysis
     partner_df, partner_trx_df = (pd.DataFrame(), pd.DataFrame())
     analytics_df = pd.DataFrame()
     if not trx_df.empty:
-        partner_df, partner_trx_df = analyze_bri_partners_unified(trx_df)
+        partner_df, partner_trx_df = analyze_partners(trx_df)
         analytics_df = create_partner_statistics_summary(partner_df)
-    personal_df = pd.DataFrame([personal_info])
-    summary_df = pd.DataFrame([summary_info]) if summary_info else pd.DataFrame()
+
     return personal_df, summary_df, trx_df, partner_trx_df, analytics_df
 
-def df_download_button(df: pd.DataFrame, label: str, filename: str):
-    if df is not None and not df.empty:
-        csv = df.to_csv(index=False).encode("utf-8")
-        st.download_button(label=label, data=csv, file_name=filename, mime="text/csv")
+# =============================
+# ---------------------- Streamlit App UI ----------------------
+# =============================
 
-# ---------------------- Streamlit App UI ---------------------- #
 st.set_page_config(page_title="BCA E-Statement Reader", layout="wide")
 st.title("📄 BCA E-Statement Reader")
 
@@ -611,53 +439,75 @@ if uploaded_pdf:
 
     # Read bytes once and reuse
     pdf_bytes = uploaded_pdf.read()
+
     personal_df, summary_df, trx_df, partner_trx_df, analytics_df = parse_bca_statement(io.BytesIO(pdf_bytes))
 
     # ✅ ADD DOWNLOAD SECTION
     st.markdown("---")
     st.subheader("📥 Download Complete Analysis")
-    
-    # Create Excel file in memory
+
     @st.cache_data
     def create_excel_download(personal_df, summary_df, trx_df, partner_trx_df, analytics_df):
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            personal_df.to_excel(writer, sheet_name='Account Info', index=False)
-            summary_df.to_excel(writer, sheet_name='Monthly Summary', index=False)
-            analytics_df.to_excel(writer, sheet_name='Analytics', index=False)
-            trx_df.to_excel(writer, sheet_name='Transactions', index=False)
-            partner_trx_df.to_excel(writer, sheet_name='Partner Summary', index=False)
-        
+            (personal_df if not personal_df.empty else pd.DataFrame()).to_excel(writer, sheet_name='Account Info', index=False)
+            (summary_df if not summary_df.empty else pd.DataFrame()).to_excel(writer, sheet_name='Monthly Summary', index=False)
+            (analytics_df if not analytics_df.empty else pd.DataFrame()).to_excel(writer, sheet_name='Analytics', index=False)
+            (trx_df if not trx_df.empty else pd.DataFrame()).to_excel(writer, sheet_name='Transactions', index=False)
+            (partner_trx_df if not partner_trx_df.empty else pd.DataFrame()).to_excel(writer, sheet_name='Partner Summary', index=False)
         output.seek(0)
         return output.getvalue()
 
     # Generate Excel file
     excel_data = create_excel_download(personal_df, summary_df, trx_df, partner_trx_df, analytics_df)
-    
-    # Download button
+
+    # Compose filename period
+    period_str = "Unknown"
+    try:
+        if not personal_df.empty and "Period" in personal_df.columns and pd.notna(personal_df.iloc[0]["Period"]):
+            period_str = personal_df.iloc[0]["Period"]
+        elif not personal_df.empty and "Start Period" in personal_df.columns and "End Period" in personal_df.columns:
+            sp = personal_df.iloc[0].get("Start Period", None)
+            ep = personal_df.iloc[0].get("End Period", None)
+            if pd.notna(sp) and pd.notna(ep):
+                period_str = f"{sp}-{ep}"
+    except Exception:
+        pass
+
     st.download_button(
         label="📊 Download Complete Analysis (Excel)",
         data=excel_data,
-        file_name=f"BCA_Statement_Analysis_{personal_df.iloc[0]['Period'] if not personal_df.empty else 'Unknown'}.xlsx",
+        file_name=f"BCA_Statement_Analysis_{period_str}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 
     st.markdown("---")
-    
+
     # Tabs section
     tab1, tab2, tab3, tab4, tab5 = st.tabs(["📌 Account Info", "📊 Monthly Summary", "📈 Analytics", "💸 Transactions", "💳 Partner Transactions"])
 
     with tab1:
-        st.dataframe(personal_df)
-
+        st.dataframe(personal_df if not personal_df.empty else pd.DataFrame(), use_container_width=True)
     with tab2:
-        st.dataframe(summary_df)
-
+        st.dataframe(summary_df if not summary_df.empty else pd.DataFrame(), use_container_width=True)
     with tab3:
-        st.dataframe(analytics_df)
-
+        st.dataframe(analytics_df if not analytics_df.empty else pd.DataFrame(), use_container_width=True)
     with tab4:
-        st.dataframe(trx_df)
-
+        st.dataframe(trx_df if not trx_df.empty else pd.DataFrame(), use_container_width=True)
     with tab5:
-        st.dataframe(partner_trx_df)
+        st.dataframe(partner_trx_df if not partner_trx_df.empty else pd.DataFrame(), use_container_width=True)
+
+else:
+    st.info("Silakan upload satu file PDF e-statement BCA untuk diproses.")
+'''
+
+requirements = """streamlit==1.37.1
+pandas>=2.0.0
+pdfplumber>=0.11.0
+XlsxWriter>=3.2.0
+"""
+
+Path("/mnt/data/app.py").write_text(app_code, encoding="utf-8")
+Path("/mnt/data/requirements.txt").write_text(requirements, encoding="utf-8")
+
+print("Updated files: /mnt/data/app.py and /mnt/data/requirements.txt")
