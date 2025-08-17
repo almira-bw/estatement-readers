@@ -895,7 +895,7 @@ if uploaded_pdf:
     # Download button
     st.download_button(
         label="📊 Download Complete Analysis (Excel)",
-        data=excel_bytes,
+        data=excel_data,
         file_name=download_name,
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
