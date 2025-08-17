@@ -52,7 +52,6 @@ def clean_amount(amount_str: str) -> float:
 # BRI 2024 Format
 
 def extract_cms_account_info(text):
-    lines = clean_statement_lines(text)
     account_info = {
         "Bank": "BRI",
         "Account Name": None,
