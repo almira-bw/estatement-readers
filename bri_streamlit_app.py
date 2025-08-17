@@ -784,9 +784,9 @@ def create_partner_statistics_summary(partner_df):
 
     return summary_df
 
-def parse_bri_statement(pdf_path, folder_path, filename):
-    full_path = os.path.join(folder_path, filename)
-    pdf_text = read_pdf_to_text(full_path)
+def parse_bri_statement(pdf_path, filename):
+    # full_path = os.path.join(folder_path, filename)
+    pdf_text = read_pdf_to_text(pdf_path)
     file_id = extract_filename_id(filename)
 
     # Initialize variables to empty DataFrames or dicts
@@ -835,11 +835,13 @@ st.title("📄 BCA E-Statement Reader")
 uploaded_pdf = st.file_uploader("Upload a BCA PDF e-statement", type="pdf")
 
 if uploaded_pdf:
+    pdf_bytes = uploaded_pdf.read()
+    filename = uploaded_pdf.name
     st.success("✅ PDF uploaded. Processing...")
 
     # Read bytes once and reuse
     pdf_bytes = uploaded_pdf.read()
-    personal_df, summary_df, trx_df, partner_trx_df, analytics_df = parse_bri_statement(io.BytesIO(pdf_bytes))
+    personal_df, summary_df, trx_df, partner_trx_df, analytics_df = parse_bri_statement(io.BytesIO(pdf_bytes), filename)
 
     # ✅ ADD DOWNLOAD SECTION
     st.markdown("---")
