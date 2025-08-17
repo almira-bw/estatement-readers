@@ -209,91 +209,133 @@ def extract_personal_info(text):
         "End Period": None
     }
 
-    # Nama & alamat (beberapa pola)
     nama_patterns = [
         r'(?:Kepada\s+Yth\.\s*/\s*To\s*:\s*\n\s*[A-Z][A-Z\s]*?\n)\s*(.*?)(?=\n\n|\nNo\.\s*Rekening|\nTanggal\s+Laporan|\nPeriode\s+Transaksi|\nNo\s+Rekening)',
         r'Kepada\s+Yth\.\s*/\s*To\s*:\s*\n\s*([^\n]+)(?:\n([^\n]*?))*?(?=\n\s*No\.\s*Rekening|\n\s*Tanggal\s+Laporan|\n\s*Account\s+No)',
         r'Kepada\s+Yth\.\s*/\s*To\s*:\s*\n\s*(.+?)(?=\n\s*No\.\s*Rekening)',
     ]
-    for p in nama_patterns:
-        m = re.search(p, text, re.DOTALL | re.IGNORECASE)
-        if m:
-            extracted = m.group(1).strip()
-            lines = [ln.strip() for ln in extracted.split('\n') if ln.strip()]
+    
+    for pattern in nama_patterns:
+        nama_match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
+        if nama_match:
+            extracted_text = nama_match.group(1).strip()
+            lines = [line.strip() for line in extracted_text.split('\n') if line.strip()]
+
             if lines:
                 personal_info['Account Name'] = lines[0]
+
                 if len(lines) > 1:
-                    alamat_lines = [ln for ln in lines[1:] if not re.match(r'\d{2}/\d{2}/\d{2,4}', ln) and 'Periode' not in ln]
-                    if alamat_lines:
-                        alamat_clean = re.sub(r'\s+', ' ', ' '.join(alamat_lines))
-                        personal_info['Address'] = alamat_clean
+                    alamat_lines = lines[1:]
+                    alamat_filtered = []
+                    for line in alamat_lines:
+                        if not re.match(r'\d{2}/\d{2}/\d{2,4}', line) and 'Periode' not in line:
+                            alamat_filtered.append(line)
+
+                    if alamat_filtered:
+                        alamat_cleaned = ' '.join(alamat_filtered)
+                        alamat_cleaned = re.sub(r'\s+', ' ', alamat_cleaned)
+                        personal_info['Address'] = alamat_cleaned
             break
 
+    if 'Account Name' not in personal_info:
+        simple_nama_pattern = r'Kepada\s+Yth\.\s*/\s*To\s*:\s*\n\s*([A-Z][A-Z\s]+)'
+        simple_match = re.search(simple_nama_pattern, text, re.IGNORECASE)
+        if simple_match:
+            personal_info['nama'] = simple_match.group(1).strip()
+
+    tanggal_patterns = [
+        r'Tanggal\s+Laporan\s*[:\s]*(\d{2}/\d{2}/\d{2,4})',
+        r'Statement\s+Date\s*[:\s]*(\d{2}/\d{2}/\d{2,4})',
+    ]
     # Tanggal laporan
-    for p in [r'Tanggal\s+Laporan\s*[:\s]*(\d{2}/\d{2}/\d{2,4})', r'Statement\s+Date\s*[:\s]*(\d{2}/\d{2}/\d{2,4})']:
-        m = re.search(p, text, re.IGNORECASE)
-        if m:
-            personal_info['Report Date'] = m.group(1)
+    for pattern in tanggal_patterns:
+        tanggal_match = re.search(pattern, text, re.IGNORECASE)
+        if tanggal_match:
+            personal_info['Report Date'] = tanggal_match.group(1)
             break
 
-    # Periode
-    for p in [r'Periode\s+Transaksi\s*[:\s]*(\d{2}/\d{2}/\d{2,4})\s*-\s*(\d{2}/\d{2}/\d{2,4})',
-              r'Transaction\s+Period\s*[:\s]*(\d{2}/\d{2}/\d{2,4})\s*-\s*(\d{2}/\d{2}/\d{2,4})']:
-        m = re.search(p, text, re.IGNORECASE)
-        if m:
-            personal_info['Start Period'] = m.group(1)
-            personal_info['End Period']   = m.group(2)
+    # Ekstrak periode transaksi dengan error handling
+    periode_patterns = [
+        r'Periode\s+Transaksi\s*[:\s]*(\d{2}/\d{2}/\d{2,4})\s*-\s*(\d{2}/\d{2}/\d{2,4})',
+        r'Transaction\s+Period\s*[:\s]*(\d{2}/\d{2}/\d{2,4})\s*-\s*(\d{2}/\d{2}/\d{2,4})',
+    ]
+    for pattern in periode_patterns:
+        periode_match = re.search(pattern, text, re.IGNORECASE)
+        if periode_match:
+            personal_info['Start Period'] = periode_match.group(1)
+            personal_info['End Period'] = periode_match.group(2)
             break
 
-    # Rekening
-    for p in [r'No\.\s*Rekening\s*\n*Account\s*No\s*[,:]*\s*(\d+)',
-              r'No\.\s*Rekening\s*[:\s]*(\d+)',
-              r'Account\s*No\s*[:\s]*(\d+)']:
-        m = re.search(p, text, re.IGNORECASE)
-        if m:
-            personal_info['Account Number'] = m.group(1)
+    # Ekstrak nomor rekening dengan error handling
+    rekening_patterns = [
+        r'No\.\s*Rekening\s*\n*Account\s*No\s*[,:]*\s*(\d+)',
+        r'No\.\s*Rekening\s*[:\s]*(\d+)',
+        r'Account\s*No\s*[:\s]*(\d+)',
+    ]
+    for pattern in rekening_patterns:
+        rekening_match = re.search(pattern, text, re.IGNORECASE)
+        if rekening_match:
+            personal_info['Account Number'] = rekening_match.group(1)
             break
 
-    # Product
-    p = r'(?:Nama\s+Produk|Product\s+Name)\s*[,:]*\s*(.*?)(?=\s*(?:Unit\s*Kerja|Business\s*Unit|Valuta|Currency|Alamat\s*Unit\s*Kerja|\n|$))'
-    m = re.search(p, text, re.IGNORECASE | re.DOTALL)
-    if m:
-        personal_info['Product Name'] = m.group(1).strip()
-
-    # Currency
-    for p in [r'Valuta\s*\n*Currency\s*[,:]*\s*([A-Z]+)', r'Valuta\s*[:\s]*([A-Z]+)', r'Currency\s*[:\s]*([A-Z]+)']:
-        m = re.search(p, text, re.IGNORECASE)
-        if m:
-            personal_info['Currency'] = m.group(1).strip()
+    # Ekstrak nama produk dengan error handling
+    produk_patterns = [
+        r'(?:Nama\s+Produk|Product\s+Name)\s*[,:]*\s*(.*?)(?=\s*(?:Unit\s*Kerja|Business\s*Unit|Valuta|Currency|Alamat\s*Unit\s*Kerja|\n|$))',
+    ]
+    for pattern in produk_patterns:
+        produk_match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
+        if produk_match:
+            personal_info['Product Name'] = produk_match.group(1).strip()
             break
 
-    # Branch
-    for p in [r'Unit\s+Kerja\s*\n*Business\s+Unit\s*[,:]*\s*([A-Z][A-Z\s]*?)(?=\s*(?:Alamat\s+Unit|Business\s+Unit\s+Address|\n|$))',
-              r'Unit\s+Kerja\s*[:\s]*([A-Z][A-Z\s]*?)(?=\s*(?:Alamat\s+Unit|Business\s+Unit\s+Address|\n|$))',
-              r'Business\s+Unit\s*[:\s]*([A-Z][A-Z\s]*?)(?=\s*(?:Alamat\s+Unit|Business\s+Unit\s+Address|\n|$))']:
-        m = re.search(p, text, re.IGNORECASE)
-        if m:
-            personal_info['Branch'] = m.group(1).strip()
+    # Ekstrak valuta dengan error handling
+    valuta_patterns = [
+        r'Valuta\s*\n*Currency\s*[,:]*\s*([A-Z]+)',
+        r'Valuta\s*[:\s]*([A-Z]+)',
+        r'Currency\s*[:\s]*([A-Z]+)',
+    ]
+    for pattern in valuta_patterns:
+        valuta_match = re.search(pattern, text, re.IGNORECASE)
+        if valuta_match:
+            personal_info['Currency'] = valuta_match.group(1).strip()
             break
 
-    # Business Unit Address
-    alamat_pats = [
+    # Ekstrak unit kerja dengan error handling
+    unit_patterns = [
+        r'Unit\s+Kerja\s*\n*Business\s+Unit\s*[,:]*\s*([A-Z][A-Z\s]*?)(?=\s*(?:Alamat\s+Unit|Business\s+Unit\s+Address|\n|$))',
+        r'Unit\s+Kerja\s*[:\s]*([A-Z][A-Z\s]*?)(?=\s*(?:Alamat\s+Unit|Business\s+Unit\s+Address|\n|$))',
+        r'Business\s+Unit\s*[:\s]*([A-Z][A-Z\s]*?)(?=\s*(?:Alamat\s+Unit|Business\s+Unit\s+Address|\n|$))',
+    ]
+    for pattern in unit_patterns:
+        unit_match = re.search(pattern, text, re.IGNORECASE)
+        if unit_match:
+            personal_info['Branch'] = unit_match.group(1).strip()
+            break
+
+    # Ekstrak alamat unit kerja dengan error handling
+    alamat_unit_kerja_patterns = [
         r'(?:Alamat\s+Unit\s+Kerja|Business\s+Unit\s+Address)\s*[,:]*\s*\n\s*([A-Z][A-Z\s]*?)\n\s*([A-Z][A-Z\s]*?)(?=\n|$)',
         r'(?:Alamat\s+Unit\s+Kerja|Business\s+Unit\s+Address)\s*[,:]*\s*([A-Z][A-Z\s]*?)\n\s*([A-Z][A-Z\s]*?)(?=\n|$)',
         r'(?:Alamat\s+Unit\s+Kerja|Business\s+Unit\s+Address)\s*[,:]*\s*([A-Z][A-Z\s]*?)(?=\n|$)',
     ]
-    for p in alamat_pats:
-        m = re.search(p, text, re.IGNORECASE | re.DOTALL)
-        if m:
-            alamat_temp = " ".join(g.strip() for g in m.groups() if g).strip()
+
+    for pattern in alamat_unit_kerja_patterns:
+        alamat_unit_match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
+        if alamat_unit_match:
+            if len(alamat_unit_match.groups()) >= 2:
+                alamat_temp = f"{alamat_unit_match.group(1).strip()} {alamat_unit_match.group(2).strip()}"
+            else:
+                alamat_temp = alamat_unit_match.group(1).strip()
+
             alamat_temp = re.sub(r'Product\s+Name\s*Business\s+Unit\s*Address ', '', alamat_temp, flags=re.IGNORECASE).strip()
             personal_info['Business Unit Address'] = alamat_temp
             break
 
-    # Financial summary (opsional; kita simpan terpisah)
+    # --- Ekstraksi Informasi Finansial (Saldo) dengan error handling ---
     financial_summary = {}
+
     try:
-        pat = re.compile(
+        balance_summary_pattern = re.compile(
             r'(?:Saldo Awal|Opening Balance)\s*\n?'
             r'(?:Opening Balance)?\s*\n?'
             r'(?:Total Transaksi Debet|Total Debit Transaction)\s*\n?'
@@ -305,27 +347,38 @@ def extract_personal_info(text):
             r'([\d,\.]+\s+[\d,\.]+\s+[\d,\.]+\s+[\d,\.]+)',
             re.IGNORECASE | re.DOTALL
         )
-        m = pat.search(text)
-        if m:
-            amounts = m.group(1).strip().split()
-            def parse_amt(s):
+
+        financial_match = balance_summary_pattern.search(text)
+        if financial_match:
+            amounts_line = financial_match.group(1).strip()
+            amounts = amounts_line.split()
+
+            def parse_amount(amount_str):
                 try:
-                    s = s.strip()
-                    if ',' in s and s.rfind(',') > s.rfind('.'):
-                        s = s.replace('.', '').replace(',', '.')
-                    elif ',' in s:
-                        s = s.replace(',', '')
-                    elif s.count('.') > 1:
-                        ip, dp = s.rsplit('.', 1)
-                        s = f"{ip.replace('.','')}.{dp}"
-                    return float(s)
+                    amount_str = amount_str.strip()
+                    if ',' in amount_str and amount_str.rfind(',') > amount_str.rfind('.'):
+                        amount_str = amount_str.replace('.', '')
+                        amount_str = amount_str.replace(',', '.')
+                    elif ',' in amount_str:
+                        amount_str = amount_str.replace(',', '')
+                    elif amount_str.count('.') > 1:
+                        parts = amount_str.rsplit('.', 1)
+                        integer_part = parts[0].replace('.', '')
+                        if len(parts) > 1:
+                            decimal_part = parts[1]
+                            amount_str = f"{integer_part}.{decimal_part}"
+                        else:
+                            amount_str = integer_part
+                    return float(amount_str)
                 except:
                     return 0.0
+
             if len(amounts) >= 4:
-                financial_summary['opening_balance'] = parse_amt(amounts[0])
-                financial_summary['total_debit_transaction'] = parse_amt(amounts[1])
-                financial_summary['total_credit_transaction'] = parse_amt(amounts[2])
-                financial_summary['closing_balance'] = parse_amt(amounts[3])
+                financial_summary['opening_balance'] = parse_amount(amounts[0])
+                financial_summary['total_debit_transaction'] = parse_amount(amounts[1])
+                financial_summary['total_credit_transaction'] = parse_amount(amounts[2])
+                financial_summary['closing_balance'] = parse_amount(amounts[3])
+
     except Exception as e:
         print(f"Error extracting financial summary: {e}")
 
