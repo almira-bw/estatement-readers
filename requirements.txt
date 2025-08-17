@@ -1,6 +1,6 @@
-streamlit
-pdfplumber
-PyMuPDF
-pandas
-xlsxwriter
-openpyxl
+streamlit==1.36.0
+pdfplumber==0.11.0
+PyMuPDF==1.24.9
+pandas==2.2.2
+openpyxl==3.1.5
+XlsxWriter==3.2.0
