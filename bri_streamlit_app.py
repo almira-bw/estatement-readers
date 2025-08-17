@@ -1,14 +1,11 @@
-import pandas as pd
-import os
-import gdown
 import re
-from collections import defaultdict
-from pydrive.auth import GoogleAuth
-from pydrive.drive import GoogleDrive
-from google.colab import drive
-from google.colab import auth
-from googleapiclient.discovery import build
-from oauth2client.client import GoogleCredentials
+import json
+import pandas as pd
+import pdfplumber
+import os
+import glob
+from typing import Dict, List, Tuple
+from datetime import datetime
 
 # General functions
 
