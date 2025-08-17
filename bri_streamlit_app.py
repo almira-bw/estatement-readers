@@ -867,7 +867,7 @@ if uploaded_pdf:
     st.download_button(
         label="📊 Download Complete Analysis (Excel)",
         data=excel_data,
-        file_name=f"BCA_Statement_Analysis_{personal_df.iloc[0]['Period'] if not personal_df.empty else 'Unknown'}.xlsx",
+        file_name=f"BRI_Statement_Analysis_{personal_df.iloc[0] if not personal_df.empty else 'Unknown'}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 
