@@ -12,14 +12,6 @@ import io
 
 # General functions
 
-def extract_text_from_pdf(pdf_path):
-    with fitz.open(pdf_path) as doc:
-        return "\n".join([page.get_text() for page in doc])
-
-def clean_statement_lines(text):
-    lines = text.splitlines()
-    return [line.strip() for line in lines if line.strip()]
-
 def convert_to_int(amount_str):
     if amount_str is None:
         return None
