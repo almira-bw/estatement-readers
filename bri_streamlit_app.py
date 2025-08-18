@@ -14,11 +14,6 @@ import streamlit as st
 # ============== General Helpers ==============
 
 def read_pdf_to_text(pdf_src):
-    """
-    Terima path ATAU bytes/BytesIO.
-    Return gabungan teks semua halaman.
-    """
-    text = ""
     try:
         if isinstance(pdf_src, (bytes, bytearray)):
             fobj = io.BytesIO(pdf_src)
@@ -69,14 +64,10 @@ def detect_format_by_filename(filename: str) -> str:
     base = Path(filename).name.lower()
 
     cms_keys = [
-        "2024"
-        # "cms", "cashmanagement", "cash-management", "ibiz", "ibizbri",
-        # "corporate", "bisnis", "business"
+        "2024", "cms"     
     ]
     est_keys = [
-        "2025"
-        # "e-statement", "estatement", "e_statement", "statement",
-        # "rekening-koran", "rekeningkoran", "e-stmt", "stmt"
+        "2025", "e-statement"
     ]
 
     if any(k in base for k in cms_keys):
@@ -93,7 +84,7 @@ def detect_format_by_filename(filename: str) -> str:
     # Default jika tak terdeteksi
     return "E_STATEMENT"
 
-# ============== BRI CMS (umum 2024) ==============
+# ============== BRI 2024 Format ==============
 
 def extract_cms_account_info(text):
     account_info = {
@@ -251,19 +242,28 @@ def extract_personal_info(text):
             lines = [line.strip() for line in extracted_text.split('\n') if line.strip()]
 
             if lines:
-                personal_info['Account Name'] = lines[0]
+                # personal_info['Account Name'] = lines[0]
+                nama_clean = lines[0]
+                nama_clean = re.sub(r'\s+Periode\s+Transaksi.*', '', nama_clean, flags=re.IGNORECASE).strip()
+                personal_info['Account Name'] = nama_clean
 
                 if len(lines) > 1:
                     alamat_lines = lines[1:]
                     alamat_filtered = []
                     for line in alamat_lines:
-                        if not re.match(r'\d{2}/\d{2}/\d{2,4}', line) and 'Periode' not in line:
-                            alamat_filtered.append(line)
-
+                      if not re.match(r'\d{2}/\d{2}/\d{2,4}', line) and 'Periode Transaksi' not in line:
+                        alamat_filtered.append(line)
+                    print(alamat_filtered)
                     if alamat_filtered:
-                        alamat_cleaned = ' '.join(alamat_filtered)
-                        alamat_cleaned = re.sub(r'\s+', ' ', alamat_cleaned)
-                        personal_info['Address'] = alamat_cleaned
+                      alamat_valid = []
+                      for line in alamat_filtered:
+                        if 'Transaction Period' not in line:
+                          alamat_valid.append(line)
+    
+                      if alamat_valid:
+                          alamat_cleaned = ' '.join(alamat_valid)
+                          alamat_cleaned = re.sub(r'\s+', ' ', alamat_cleaned)
+                          personal_info['Address'] = alamat_cleaned
             break
 
     if 'Account Name' not in personal_info:
@@ -800,14 +800,3 @@ if uploaded_pdf:
 
     with tab5:
         st.dataframe(partner_trx_df)
-
-        with st.expander("🔎 Debug Partner Extraction"):
-            st.write({"rows_total": int(len(trx_df)), "partner_summary_rows": int(len(partner_trx_df))})
-            desc_col = next((c for c in ["deskripsi","Description","Remark"] if c in trx_df.columns), None)
-            if desc_col:
-                tmp = trx_df[[desc_col]].copy()
-                tmp["partner_name"] = tmp[desc_col].apply(extract_partner_name_bri)
-                st.write({"identified": int(tmp["partner_name"].notna().sum())})
-                st.dataframe(tmp[tmp["partner_name"].isna()].head(20))
-            else:
-                st.info("Kolom deskripsi tidak ditemukan.")
