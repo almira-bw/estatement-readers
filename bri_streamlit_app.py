@@ -14,6 +14,7 @@ import streamlit as st
 # ============== General Helpers ==============
 
 def read_pdf_to_text(pdf_src):
+    text = ""
     try:
         if isinstance(pdf_src, (bytes, bytearray)):
             fobj = io.BytesIO(pdf_src)
