@@ -415,41 +415,69 @@ def extract_personal_info(text):
     return personal_info, financial_summary
 
 def extract_transactions(text: str) -> List[Dict]:
+    """Extract semua transaksi dari bank statement"""
     transactions = []
-    for line in text.split('\n'):
+
+    # Pattern untuk menangkap transaksi
+    # Format: DD/MM/YY HH:MM:SS Description TellerID Debit Credit Balance
+    transaction_pattern = r'(\d{2}/\d{2}/\d{2})\s+(\d{2}:\d{2}:\d{2})\s+(.+?)\s+(\d{7})\s+([\d,\.]+)\s+([\d,\.]+)\s+([\d,\.]+)'
+
+    lines = text.split('\n')
+
+    for line in lines:
         line = line.strip()
         if not line:
             continue
+
+        # Cek apakah baris dimulai dengan tanggal
         if re.match(r'^\d{2}/\d{2}/\d{2}\s+\d{2}:\d{2}:\d{2}', line):
+            # Split berdasarkan spasi, tapi hati-hati dengan deskripsi yang panjang
             parts = line.split()
             if len(parts) >= 7:
                 try:
-                    # ambil 4 item numeric terakhir dari belakang
+                    date = parts[0]
+                    time = parts[1]
+                    teller_id = None
+                    debit = None
+                    credit = None
+                    balance = None
+
+                    # Cari teller ID (7 digit number), debit, credit, balance dari akhir
+                    # Ambil 4 elemen terakhir
                     numeric_parts = []
                     for i in range(len(parts) - 1, -1, -1):
-                        p = parts[i]
-                        if re.match(r'^[\d,\.]+$', p) or re.match(r'^\d{7}$', p):
-                            numeric_parts.insert(0, p)
+                        if re.match(r'^[\d,\.]+$', parts[i]) or re.match(r'^\d{7}$', parts[i]):
+                            numeric_parts.insert(0, parts[i])
                             if len(numeric_parts) == 4:
                                 break
+
                     if len(numeric_parts) == 4:
                         teller_id = numeric_parts[0]
-                        debit     = clean_amount(numeric_parts[1])
-                        credit    = clean_amount(numeric_parts[2])
-                        balance   = clean_amount(numeric_parts[3])
-                        desc      = ' '.join(parts[2: len(parts) - 4])
+                        debit = clean_amount(numeric_parts[1])
+                        credit = clean_amount(numeric_parts[2])
+                        balance = clean_amount(numeric_parts[3])
 
-                        transactions.append({
-                            'tanggal': parts[0],
-                            'waktu': parts[1],
-                            'deskripsi': desc.strip(),
+                        # Description adalah sisa parts setelah date, time dan sebelum 4 numeric parts terakhir
+                        desc_start = 2  # setelah date dan time
+                        desc_end = len(parts) - 4  # sebelum 4 numeric parts
+                        description = ' '.join(parts[desc_start:desc_end])
+
+                        transaction = {
+                            'tanggal': date,
+                            'waktu': time,
+                            'deskripsi': description.strip(),
                             'teller_id': teller_id,
                             'debit': debit,
                             'kredit': credit,
                             'saldo': balance
-                        })
-                except:
+                        }
+
+                        transactions.append(transaction)
+
+                except (ValueError, IndexError) as e:
+                    # Skip baris yang tidak bisa diparse
                     continue
+
     return transactions
 
 # ============== Partner Extraction & Analytics ==============
